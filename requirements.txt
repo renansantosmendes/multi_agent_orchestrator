@@ -1,0 +1,14 @@
+uv
+langchain
+langchain-core
+langchain-openai 
+langgraph 
+langgraph-checkpoint
+langchain-community
+langfuse
+scikit-learn
+mcp
+langchain-mcp-adapters
+requests
+httpx
+pytest
