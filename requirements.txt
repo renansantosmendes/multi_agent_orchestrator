@@ -12,3 +12,4 @@ langchain-mcp-adapters
 requests
 httpx
 pytest
+python-dotenv
