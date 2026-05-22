@@ -3,12 +3,16 @@ from __future__ import annotations
 from typing import Any, Literal, Optional
 
 import numpy as np
+import openai
 import pandas as pd
+from dotenv import load_dotenv
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from typing_extensions import TypedDict
+
+load_dotenv()
 
 
 class PreprocessorState(TypedDict, total=False):
@@ -120,9 +124,9 @@ class PreprocessorAgent:
     ) -> Command[Literal["preprocessing_node"]]:
         """Send the profiling report to an LLM and collect insights.
 
-        Uses the Anthropic Messages API (``claude-sonnet-4-20250514``) to
-        generate domain-specific observations, potential quality issues, and
-        feature engineering suggestions based on the profiling report.
+        Uses the OpenAI Chat Completions API to generate domain-specific
+        observations, potential quality issues, and feature engineering
+        suggestions based on the profiling report.
 
         Args:
             state: Must contain ``profiling_report``.
@@ -132,8 +136,6 @@ class PreprocessorAgent:
             to the preprocessing node.
         """
         import json
-        import os
-        import urllib.request
 
         report = state["profiling_report"]
 
@@ -151,35 +153,14 @@ class PreprocessorAgent:
             "Be specific and reference actual column names and numbers."
         )
 
-        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-
-        payload = json.dumps(
-            {
-                "model": "claude-sonnet-4-20250514",
-                "max_tokens": 1024,
-                "messages": [{"role": "user", "content": prompt}],
-            }
-        ).encode()
-
-        request = urllib.request.Request(
-            "https://api.anthropic.com/v1/messages",
-            data=payload,
-            headers={
-                "Content-Type": "application/json",
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-            },
-            method="POST",
-        )
-
         try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                body = json.loads(response.read().decode())
-                insight_text = "".join(
-                    block["text"]
-                    for block in body.get("content", [])
-                    if block.get("type") == "text"
-                )
+            client = openai.OpenAI()
+            response = client.chat.completions.create(
+                model="gpt-4o",
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=1024,
+            )
+            insight_text = response.choices[0].message.content or ""
         except Exception as error:
             insight_text = f"LLM call failed: {error}"
 

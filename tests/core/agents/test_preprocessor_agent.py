@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock, patch
 
 import numpy as np
@@ -9,7 +8,7 @@ import pytest
 from langgraph.graph import END
 from sklearn.preprocessing import StandardScaler
 
-from src.core.agents.preprocessor import PreprocessorAgent, PreprocessorState
+from src.core.agents.preprocessor_agent import PreprocessorAgent, PreprocessorState
 
 
 def make_sample_dataframe() -> pd.DataFrame:
@@ -20,13 +19,14 @@ def make_sample_dataframe() -> pd.DataFrame:
     })
 
 
-def make_mock_urlopen_response(text: str) -> MagicMock:
-    body = {"content": [{"type": "text", "text": text}]}
-    mock_response = MagicMock()
-    mock_response.read.return_value = json.dumps(body).encode()
-    mock_response.__enter__ = MagicMock(return_value=mock_response)
-    mock_response.__exit__ = MagicMock(return_value=False)
-    return mock_response
+def make_mock_openai_client(text: str) -> MagicMock:
+    choice = MagicMock()
+    choice.message.content = text
+    response = MagicMock()
+    response.choices = [choice]
+    client = MagicMock()
+    client.chat.completions.create.return_value = response
+    return client
 
 
 class TestPreprocessorAgentInit:
@@ -102,54 +102,30 @@ class TestProfilingNode:
 class TestLlmInsightNode:
     def test_returns_text_from_response(self) -> None:
         state: PreprocessorState = {"profiling_report": {"shape": (100, 5)}}
-        mock_response = make_mock_urlopen_response("Dataset looks balanced.")
-        with patch("urllib.request.urlopen", return_value=mock_response):
+        mock_client = make_mock_openai_client("Dataset looks balanced.")
+        with patch("openai.OpenAI", return_value=mock_client):
             command = PreprocessorAgent._llm_insight_node(state)
         assert command.update["llm_insight"] == "Dataset looks balanced."
 
-    def test_concatenates_multiple_text_blocks(self) -> None:
-        body = {
-            "content": [
-                {"type": "text", "text": "Part one. "},
-                {"type": "text", "text": "Part two."},
-            ]
-        }
-        mock_response = MagicMock()
-        mock_response.read.return_value = json.dumps(body).encode()
-        mock_response.__enter__ = MagicMock(return_value=mock_response)
-        mock_response.__exit__ = MagicMock(return_value=False)
+    def test_handles_none_content_gracefully(self) -> None:
         state: PreprocessorState = {"profiling_report": {}}
-        with patch("urllib.request.urlopen", return_value=mock_response):
+        mock_client = make_mock_openai_client("")
+        mock_client.chat.completions.create.return_value.choices[0].message.content = None
+        with patch("openai.OpenAI", return_value=mock_client):
             command = PreprocessorAgent._llm_insight_node(state)
-        assert command.update["llm_insight"] == "Part one. Part two."
-
-    def test_ignores_non_text_blocks(self) -> None:
-        body = {
-            "content": [
-                {"type": "tool_use", "id": "abc"},
-                {"type": "text", "text": "Only this."},
-            ]
-        }
-        mock_response = MagicMock()
-        mock_response.read.return_value = json.dumps(body).encode()
-        mock_response.__enter__ = MagicMock(return_value=mock_response)
-        mock_response.__exit__ = MagicMock(return_value=False)
-        state: PreprocessorState = {"profiling_report": {}}
-        with patch("urllib.request.urlopen", return_value=mock_response):
-            command = PreprocessorAgent._llm_insight_node(state)
-        assert command.update["llm_insight"] == "Only this."
+        assert command.update["llm_insight"] == ""
 
     def test_handles_api_failure_gracefully(self) -> None:
         state: PreprocessorState = {"profiling_report": {}}
-        with patch("urllib.request.urlopen", side_effect=Exception("Timeout")):
+        with patch("openai.OpenAI", side_effect=Exception("Timeout")):
             command = PreprocessorAgent._llm_insight_node(state)
         assert "LLM call failed" in command.update["llm_insight"]
         assert "Timeout" in command.update["llm_insight"]
 
     def test_routes_to_preprocessing_node(self) -> None:
         state: PreprocessorState = {"profiling_report": {}}
-        mock_response = make_mock_urlopen_response("insight")
-        with patch("urllib.request.urlopen", return_value=mock_response):
+        mock_client = make_mock_openai_client("insight")
+        with patch("openai.OpenAI", return_value=mock_client):
             command = PreprocessorAgent._llm_insight_node(state)
         assert command.goto == "preprocessing_node"
 
@@ -275,8 +251,8 @@ class TestPreprocessorAgentRun:
             "target": np.tile([1.0, 2.0, 3.0], 20),
         })
         agent = PreprocessorAgent()
-        mock_response = make_mock_urlopen_response("Good dataset.")
-        with patch("urllib.request.urlopen", return_value=mock_response):
+        mock_client = make_mock_openai_client("Good dataset.")
+        with patch("openai.OpenAI", return_value=mock_client):
             result = agent.run(dataframe, "target")
         assert "train_input_data" in result
         assert "test_input_data" in result
@@ -289,8 +265,8 @@ class TestPreprocessorAgentRun:
             "target": np.tile([1.0, 2.0], 30),
         })
         agent = PreprocessorAgent()
-        mock_response = make_mock_urlopen_response("Insight text here.")
-        with patch("urllib.request.urlopen", return_value=mock_response):
+        mock_client = make_mock_openai_client("Insight text here.")
+        with patch("openai.OpenAI", return_value=mock_client):
             result = agent.run(dataframe, "target")
         assert result["llm_insight"] == "Insight text here."
 
@@ -300,7 +276,7 @@ class TestPreprocessorAgentRun:
             "target": np.tile([1.0, 2.0], 30),
         })
         agent = PreprocessorAgent()
-        mock_response = make_mock_urlopen_response("ok")
-        with patch("urllib.request.urlopen", return_value=mock_response):
+        mock_client = make_mock_openai_client("ok")
+        with patch("openai.OpenAI", return_value=mock_client):
             result = agent.run(dataframe, "target")
         assert "profiling_report" in result

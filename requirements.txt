@@ -1,7 +1,8 @@
 uv
 langchain
 langchain-core
-langchain-openai 
+openai
+langchain-openai
 langgraph 
 langgraph-checkpoint
 langchain-community
