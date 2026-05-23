@@ -15,3 +15,5 @@ httpx
 pytest
 python-dotenv
 pandas
+deepagents
+evidently
