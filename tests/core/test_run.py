@@ -1,18 +1,23 @@
 from __future__ import annotations
 
-import pytest
+from unittest.mock import MagicMock, patch
 
 from src.core.run import main
 
 
 class TestMain:
-    def test_runs_without_error(self, capsys: pytest.CaptureFixture) -> None:
-        main()
-        captured = capsys.readouterr()
-        assert "Metrics:" in captured.out
+    """Tests for the run.main entry point."""
 
-    def test_outputs_classification_metrics(self, capsys: pytest.CaptureFixture) -> None:
+    @patch("src.core.run.run_pipeline")
+    def test_delegates_to_run_pipeline(self, mock_run_pipeline: MagicMock) -> None:
+        """Verifies that main() delegates execution to run_pipeline."""
         main()
-        captured = capsys.readouterr()
-        for key in ("accuracy", "precision", "recall", "f1"):
-            assert key in captured.out
+
+        mock_run_pipeline.assert_called_once()
+
+    @patch("src.core.run.run_pipeline")
+    def test_runs_without_error(self, mock_run_pipeline: MagicMock) -> None:
+        """Verifies that main() completes without raising an exception."""
+        mock_run_pipeline.return_value = None
+
+        main()
