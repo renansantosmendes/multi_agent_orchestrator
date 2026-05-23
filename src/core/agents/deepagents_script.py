@@ -403,10 +403,6 @@ def deploy_model(
     summary = (
         f"🚀 DEPLOYMENT COMPLETE\n"
         f"   Model:    {model_name} (accuracy: {accuracy:.4f})\n"
-        f"   Artifacts:\n"
-        f"     - Model:    {model_path}\n"
-        f"     - Scaler:   {scaler_path}\n"
-        f"     - Metadata: {meta_path}\n"
         f"   Status: ✅ Ready for production"
     )
 
