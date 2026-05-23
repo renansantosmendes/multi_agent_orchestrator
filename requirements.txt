@@ -1,4 +1,6 @@
 uv
+fastapi
+uvicorn[standard]
 langchain
 langchain-core
 openai
