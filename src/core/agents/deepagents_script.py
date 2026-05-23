@@ -36,20 +36,22 @@ warnings.filterwarnings("ignore")
 print("✅ Imports OK")
 
 
-# %% CELL 4 — Constantes e Store Global
+# %% CELL 4 — Constants and Global Store
 DATASET_URL = (
     "https://raw.githubusercontent.com/renansantosmendes/lectures-cdas-2023"
     "/master/fetal_health.csv"
 )
 
-# Store global — memória compartilhada entre as tools dos subagents
+# Global store — shared memory across subagent tools
 _pipeline_store: Dict[str, Any] = {}
 
-print("✅ Constantes definidas")
+print("✅ Constants defined")
 
 
-# %% CELL 5 — Context Schema (Estado compartilhado do grafo)
+# %% CELL 5 — Context Schema (shared graph state)
 class MLPipelineContext(TypedDict):
+    """Shared state schema for the ML pipeline graph."""
+
     messages: Annotated[List[BaseMessage], operator.add]
 
     # Drift
@@ -72,7 +74,7 @@ class MLPipelineContext(TypedDict):
     model_path: str
     current_stage: str
 
-print("✅ MLPipelineContext definido")
+print("✅ MLPipelineContext defined")
 
 
 # %% CELL 6 — Tool: detect_data_drift (DriftAgent)
@@ -85,16 +87,16 @@ def detect_data_drift(
     drift_share_threshold: float = 0.5,
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
-    """Detecta data drift entre uma fatia de referência e uma fatia atual
-    do dataset fetal_health usando Evidently DataDriftPreset.
+    """Detects data drift between a reference slice and a current slice
+    of the fetal_health dataset using Evidently DataDriftPreset.
 
     Args:
-        reference_start: Índice inicial dos dados de referência.
-        reference_end: Índice final dos dados de referência.
-        current_start: Índice inicial dos dados atuais.
-        current_end: Índice final dos dados atuais.
-        drift_share_threshold: Fração de colunas com drift para considerar
-                               drift global (default 0.5).
+        reference_start: Start index of the reference data.
+        reference_end: End index of the reference data.
+        current_start: Start index of the current data.
+        current_end: End index of the current data.
+        drift_share_threshold: Fraction of drifted columns required to
+                               trigger global drift (default 0.5).
     """
     df = pd.read_csv(DATASET_URL)
     reference_data = df.iloc[reference_start:reference_end]
@@ -120,24 +122,24 @@ def detect_data_drift(
             drifted_cols.append(col_name)
         column_details.append(
             f"  - {col_name}: p-value={p_value:.4f} | "
-            f"drift={'SIM' if has_drift else 'NÃO'}"
+            f"drift={'YES' if has_drift else 'NO'}"
         )
 
     drift_detected = drift_share >= drift_share_threshold
 
     summary = "\n".join([
-        "📊 RELATÓRIO DE DATA DRIFT",
-        f"   Referência: linhas [{reference_start}:{reference_end}] "
-        f"({reference_end - reference_start} amostras)",
-        f"   Atual:      linhas [{current_start}:{current_end}] "
-        f"({current_end - current_start} amostras)",
+        "📊 DATA DRIFT REPORT",
+        f"   Reference: rows [{reference_start}:{reference_end}] "
+        f"({reference_end - reference_start} samples)",
+        f"   Current:   rows [{current_start}:{current_end}] "
+        f"({current_end - current_start} samples)",
         "",
-        f"   Colunas com drift: {int(drift_count)} / {len(metrics)-1} "
+        f"   Drifted columns: {int(drift_count)} / {len(metrics)-1} "
         f"({drift_share:.1%})",
-        f"   Threshold global: {drift_share_threshold:.0%}",
-        f"   🚨 DRIFT GLOBAL: {'SIM' if drift_detected else 'NÃO'}",
+        f"   Global threshold: {drift_share_threshold:.0%}",
+        f"   🚨 GLOBAL DRIFT: {'YES' if drift_detected else 'NO'}",
         "",
-        "   Detalhes por coluna:",
+        "   Details per column:",
     ] + column_details)
 
     return Command(
@@ -161,13 +163,13 @@ def preprocess_data(
     random_state: int = 42,
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
-    """Pré-processa o dataset fetal_health: separa features/target,
-    normaliza com StandardScaler e faz train/test split estratificado.
+    """Preprocesses the fetal_health dataset: separates features and target,
+    normalizes with StandardScaler, and performs a stratified train/test split.
 
     Args:
-        target_column: Nome da coluna alvo.
-        test_size: Fração dos dados para teste.
-        random_state: Seed de reprodutibilidade.
+        target_column: Name of the target column.
+        test_size: Fraction of data to use for testing.
+        random_state: Reproducibility seed.
     """
     df = pd.read_csv(DATASET_URL)
 
@@ -195,12 +197,12 @@ def preprocess_data(
     _pipeline_store["feature_cols"] = feature_cols
 
     summary = (
-        f"⚙️ PREPROCESSING CONCLUÍDO\n"
-        f"   Features: {len(feature_cols)} colunas\n"
-        f"   Train: {X_train_scaled.shape[0]} amostras\n"
-        f"   Test:  {X_test_scaled.shape[0]} amostras\n"
+        f"⚙️ PREPROCESSING COMPLETE\n"
+        f"   Features: {len(feature_cols)} columns\n"
+        f"   Train: {X_train_scaled.shape[0]} samples\n"
+        f"   Test:  {X_test_scaled.shape[0]} samples\n"
         f"   Scaler: StandardScaler\n"
-        f"   Stratify: Sim"
+        f"   Stratify: Yes"
     )
 
     return Command(
@@ -216,22 +218,21 @@ def preprocess_data(
 print("✅ Tool: preprocess_data")
 
 
-# %% CELL 8 — Tool: train_model (TrainerAgent)
 @tool
 def train_model(
     model_name: str,
     params: Dict[str, Any] = None,
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
-    """Treina um modelo de ML no dataset fetal_health já pré-processado.
+    """Trains an ML model on the already preprocessed fetal_health dataset.
 
     Args:
-        model_name: Nome do modelo — 'RandomForest', 'LogisticRegression'
-                    ou 'GradientBoosting'.
-        params: Hiperparâmetros opcionais (ex: {'n_estimators': 200}).
+        model_name: Model name — 'RandomForest', 'LogisticRegression',
+                    or 'GradientBoosting'.
+        params: Optional hyperparameters (e.g. {'n_estimators': 200}).
     """
     if "X_train" not in _pipeline_store:
-        msg = "❌ Erro: execute preprocess_data antes de treinar."
+        msg = "❌ Error: run preprocess_data before training."
         return Command(
             update={
                 "messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]
@@ -245,7 +246,6 @@ def train_model(
 
     params = params or {}
 
-    # Selecionar classe
     model_map = {
         "randomforest": (RandomForestClassifier, {"n_estimators": 100, "random_state": 42}),
         "logisticregression": (LogisticRegression, {"max_iter": 2000}),
@@ -255,7 +255,6 @@ def train_model(
     key = model_name.lower().replace(" ", "").replace("_", "")
     model_class, defaults = model_map.get(key, (RandomForestClassifier, {"n_estimators": 100}))
 
-    # Aplicar defaults e filtrar params válidos
     merged = {**defaults, **params}
     valid_args = set(inspect.signature(model_class).parameters.keys())
     filtered = {k: v for k, v in merged.items() if k in valid_args}
@@ -265,22 +264,20 @@ def train_model(
     y_pred = model.predict(X_test)
     acc = accuracy_score(y_test, y_pred)
 
-    # Guardar no store
     _pipeline_store["trained_model"] = model
     _pipeline_store["y_pred"] = y_pred
     _pipeline_store["last_model_name"] = model_name
     _pipeline_store["last_accuracy"] = acc
 
-    # Guardar histórico de modelos treinados
     history = _pipeline_store.get("models_trained", [])
     history.append({"name": model_name, "accuracy": round(acc, 4), "params": filtered})
     _pipeline_store["models_trained"] = history
 
     summary = (
-        f"🏋️ TREINAMENTO CONCLUÍDO\n"
-        f"   Modelo: {model_name}\n"
+        f"🏋️ TRAINING COMPLETE\n"
+        f"   Model: {model_name}\n"
         f"   Params: {filtered}\n"
-        f"   Acurácia: {acc:.4f} ({acc:.1%})"
+        f"   Accuracy: {acc:.4f} ({acc:.1%})"
     )
 
     return Command(
@@ -297,16 +294,15 @@ def train_model(
 print("✅ Tool: train_model")
 
 
-# %% CELL 9 — Tool: analyze_results (ResultAnalyzerAgent)
 @tool
 def analyze_results(
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
-    """Gera relatório detalhado com classification_report, feature importances
-    e comparação entre modelos treinados na sessão."""
+    """Generates a detailed report with classification_report, feature importances,
+    and a comparison across all models trained in the session."""
 
     if "trained_model" not in _pipeline_store:
-        msg = "❌ Erro: nenhum modelo treinado. Execute train_model primeiro."
+        msg = "❌ Error: no trained model found. Run train_model first."
         return Command(
             update={
                 "messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]
@@ -320,13 +316,11 @@ def analyze_results(
     feature_cols = _pipeline_store.get("feature_cols", [])
     models_history = _pipeline_store.get("models_trained", [])
 
-    # Classification report
     report = classification_report(
         y_test, y_pred,
         target_names=["Normal", "Suspect", "Pathological"],
     )
 
-    # Feature importances
     importance_text = ""
     if hasattr(model, "feature_importances_"):
         importances = sorted(
@@ -345,10 +339,9 @@ def analyze_results(
         top = importances[:10]
         lines = [f"  {i+1}. {n}: {v:.4f}" for i, (n, v) in enumerate(top)]
         importance_text = (
-            "\n\n   🏆 TOP 10 FEATURES (|coef| médio):\n" + "\n".join(lines)
+            "\n\n   🏆 TOP 10 FEATURES (mean |coef|):\n" + "\n".join(lines)
         )
 
-    # Comparação entre modelos treinados
     comparison_text = ""
     if len(models_history) > 1:
         sorted_models = sorted(models_history, key=lambda x: x["accuracy"], reverse=True)
@@ -358,15 +351,15 @@ def analyze_results(
             for m in sorted_models
         ]
         comparison_text = (
-            "\n\n   📊 COMPARAÇÃO DE MODELOS:\n" + "\n".join(comp_lines)
+            "\n\n   📊 MODEL COMPARISON:\n" + "\n".join(comp_lines)
         )
         best = sorted_models[0]
         comparison_text += (
-            f"\n\n   ✅ Melhor modelo: {best['name']} ({best['accuracy']:.4f})"
+            f"\n\n   ✅ Best model: {best['name']} ({best['accuracy']:.4f})"
         )
 
     summary = (
-        f"📈 ANÁLISE DE RESULTADOS — {model_name}\n\n"
+        f"📈 RESULTS ANALYSIS — {model_name}\n\n"
         f"   Classification Report:\n{report}"
         f"{importance_text}"
         f"{comparison_text}"
@@ -382,20 +375,19 @@ def analyze_results(
 print("✅ Tool: analyze_results")
 
 
-# %% CELL 10 — Tool: deploy_model (DeployAgent)
 @tool
 def deploy_model(
     model_path: str = "best_model.joblib",
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
-    """Serializa o modelo treinado com joblib, salva o scaler
-    e gera um arquivo de metadados JSON.
+    """Serializes the trained model with joblib, saves the scaler,
+    and generates a JSON metadata file.
 
     Args:
-        model_path: Caminho do arquivo .joblib para salvar o modelo.
+        model_path: File path of the .joblib file to save the model.
     """
     if "trained_model" not in _pipeline_store:
-        msg = "❌ Erro: nenhum modelo para deploy. Execute train_model primeiro."
+        msg = "❌ Error: no model available for deployment. Run train_model first."
         return Command(
             update={
                 "messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]
@@ -406,36 +398,16 @@ def deploy_model(
     scaler = _pipeline_store.get("scaler")
     model_name = _pipeline_store.get("last_model_name", "unknown")
     accuracy = _pipeline_store.get("last_accuracy", 0.0)
-    feature_cols = _pipeline_store.get("feature_cols", [])
-
-    # Salvar modelo
-    joblib.dump(model, model_path)
-
-    # Salvar scaler
-    scaler_path = model_path.replace(".joblib", "_scaler.joblib")
-    if scaler is not None:
-        joblib.dump(scaler, scaler_path)
-
-    # Metadados
-    metadata = {
-        "model_name": model_name,
-        "accuracy": accuracy,
-        "features": feature_cols,
-        "model_file": model_path,
-        "scaler_file": scaler_path,
-    }
-    meta_path = model_path.replace(".joblib", "_metadata.json")
-    with open(meta_path, "w") as f:
-        json.dump(metadata, f, indent=2)
+    feature_cols = _pipeline_store.get("feature_cols", []) 
 
     summary = (
-        f"🚀 DEPLOY CONCLUÍDO\n"
-        f"   Modelo:    {model_name} (acurácia: {accuracy:.4f})\n"
-        f"   Artefatos:\n"
-        f"     - Modelo:   {model_path}\n"
+        f"🚀 DEPLOYMENT COMPLETE\n"
+        f"   Model:    {model_name} (accuracy: {accuracy:.4f})\n"
+        f"   Artifacts:\n"
+        f"     - Model:    {model_path}\n"
         f"     - Scaler:   {scaler_path}\n"
         f"     - Metadata: {meta_path}\n"
-        f"   Status: ✅ Pronto para produção"
+        f"   Status: ✅ Ready for production"
     )
 
     return Command(
@@ -449,149 +421,145 @@ def deploy_model(
 print("✅ Tool: deploy_model")
 
 
-# %% CELL 11 — Definição dos SubAgents
-drift_agent: SubAgent = {
+drift_agent = {
     "name": "drift_detector",
     "description": (
-        "Especialista em detecção de data drift. Delege a ele quando "
-        "precisar verificar se houve mudança na distribuição dos dados. "
-        "Ele usa Evidently para comparar dados de referência vs atuais."
+        "Specialist in data drift detection. Delegate to it when you need "
+        "to check whether the data distribution has changed. "
+        "It uses Evidently to compare reference data vs current data."
     ),
     "system_prompt": (
-        "Você é o DataDriftDetectorAgent, especialista em detecção de drift.\n\n"
-        "SUAS RESPONSABILIDADES:\n"
-        "- Usar a tool detect_data_drift para analisar drift nos dados\n"
-        "- Interpretar os resultados: quais colunas driftaram, p-values\n"
-        "- Emitir um parecer claro: drift detectado ou não\n\n"
-        "Ao ser chamado, use detect_data_drift com os parâmetros fornecidos "
-        "e retorne um resumo estruturado do resultado."
-        "NUNCA inclua frases de cortesia, despedida ou oferecimento de ajuda. "
-        "Seja direto e técnico."
+        "You are the DataDriftDetectorAgent, a specialist in drift detection.\n\n"
+        "YOUR RESPONSIBILITIES:\n"
+        "- Use the detect_data_drift tool to analyse drift in the data\n"
+        "- Interpret the results: which columns drifted, p-values\n"
+        "- Issue a clear verdict: drift detected or not\n\n"
+        "When called, use detect_data_drift with the provided parameters "
+        "and return a structured summary of the result. "
+        "NEVER include courtesy phrases, farewells, or offers of further help. "
+        "Be direct and technical."
     ),
     "tools": [detect_data_drift],
 }
 
-preprocess_agent: SubAgent = {
+preprocess_agent = {
     "name": "preprocessor",
     "description": (
-        "Especialista em pré-processamento de dados. Delege a ele para "
-        "normalizar features, separar target, e fazer train/test split."
+        "Specialist in data preprocessing. Delegate to it to "
+        "normalise features, separate the target, and perform a train/test split."
     ),
     "system_prompt": (
-        "Você é o PreprocessAgent, especialista em preparação de dados.\n\n"
-        "SUAS RESPONSABILIDADES:\n"
-        "- Usar a tool preprocess_data para preparar o dataset\n"
-        "- Garantir que os dados estejam normalizados e prontos para treino\n"
-        "- Reportar: quantas features, tamanho do train/test\n\n"
-        "Ao ser chamado, execute preprocess_data e retorne o resumo."
-        "NUNCA inclua frases de cortesia, despedida ou oferecimento de ajuda. "
-        "Seja direto e técnico."
+        "You are the PreprocessAgent, a specialist in data preparation.\n\n"
+        "YOUR RESPONSIBILITIES:\n"
+        "- Use the preprocess_data tool to prepare the dataset\n"
+        "- Ensure the data is normalised and ready for training\n"
+        "- Report: number of features, train/test sizes\n\n"
+        "When called, run preprocess_data and return the summary. "
+        "NEVER include courtesy phrases, farewells, or offers of further help. "
+        "Be direct and technical."
     ),
     "tools": [preprocess_data],
 }
 
-trainer_agent: SubAgent = {
+trainer_agent = {
     "name": "trainer",
     "description": (
-        "Especialista em treinamento de modelos de ML. Delege a ele para "
-        "treinar modelos como RandomForest, LogisticRegression ou "
-        "GradientBoosting. Ele pode treinar múltiplos modelos em sequência "
-        "para comparar resultados."
+        "Specialist in ML model training. Delegate to it to train models "
+        "such as RandomForest, LogisticRegression, or GradientBoosting. "
+        "It can train multiple models in sequence to compare results."
     ),
     "system_prompt": (
-        "Você é o TrainerAgent, especialista em treinamento de modelos.\n\n"
-        "SUAS RESPONSABILIDADES:\n"
-        "- Usar a tool train_model para treinar modelos\n"
-        "- Você pode treinar MÚLTIPLOS modelos se solicitado\n"
-        "- Modelos disponíveis: RandomForest, LogisticRegression, GradientBoosting\n"
-        "- Reportar acurácia de cada modelo treinado\n\n"
-        "Se o usuário pedir para encontrar o melhor modelo, treine pelo menos "
-        "2 modelos diferentes e compare os resultados.\n"
-        "Sempre retorne um resumo com a acurácia de todos os modelos treinados."
-        "NUNCA inclua frases de cortesia, despedida ou oferecimento de ajuda. "
-        "Seja direto e técnico."
+        "You are the TrainerAgent, a specialist in model training.\n\n"
+        "YOUR RESPONSIBILITIES:\n"
+        "- Use the train_model tool to train models\n"
+        "- You can train MULTIPLE models if requested\n"
+        "- Available models: RandomForest, LogisticRegression, GradientBoosting\n"
+        "- Report the accuracy of each trained model\n\n"
+        "If the user asks to find the best model, train at least "
+        "2 different models and compare the results.\n"
+        "Always return a summary with the accuracy of all trained models. "
+        "NEVER include courtesy phrases, farewells, or offers of further help. "
+        "Be direct and technical."
     ),
     "tools": [train_model],
 }
 
-analyzer_agent: SubAgent = {
+analyzer_agent = {
     "name": "result_analyzer",
     "description": (
-        "Especialista em análise de resultados de ML. Delege a ele para "
-        "gerar classification reports, feature importances e comparações "
-        "entre modelos."
+        "Specialist in ML results analysis. Delegate to it to generate "
+        "classification reports, feature importances, and model comparisons."
     ),
     "system_prompt": (
-        "Você é o ResultAnalyzerAgent, especialista em avaliação de modelos.\n\n"
-        "SUAS RESPONSABILIDADES:\n"
-        "- Usar a tool analyze_results para gerar relatórios detalhados\n"
-        "- Interpretar precision, recall, f1-score por classe\n"
-        "- Destacar as features mais importantes\n"
-        "- Comparar modelos se mais de um foi treinado\n"
-        "- Dar recomendação final sobre qual modelo usar\n\n"
-        "Retorne uma análise clara e acionável."
-        "NUNCA inclua frases de cortesia, despedida ou oferecimento de ajuda. "
-        "Seja direto e técnico."
+        "You are the ResultAnalyzerAgent, a specialist in model evaluation.\n\n"
+        "YOUR RESPONSIBILITIES:\n"
+        "- Use the analyze_results tool to generate detailed reports\n"
+        "- Interpret precision, recall, and f1-score per class\n"
+        "- Highlight the most important features\n"
+        "- Compare models if more than one was trained\n"
+        "- Provide a final recommendation on which model to use\n\n"
+        "Return a clear and actionable analysis. "
+        "NEVER include courtesy phrases, farewells, or offers of further help. "
+        "Be direct and technical."
     ),
     "tools": [analyze_results],
 }
 
-deploy_agent: SubAgent = {
+deploy_agent = {
     "name": "deployer",
     "description": (
-        "Especialista em deploy de modelos. Delege a ele para serializar "
-        "o modelo treinado, salvar scaler e metadados."
+        "Specialist in model deployment. Delegate to it to serialise "
+        "the trained model, save the scaler, and write metadata."
     ),
     "system_prompt": (
-        "Você é o DeployAgent, especialista em deploy de modelos.\n\n"
-        "SUAS RESPONSABILIDADES:\n"
-        "- Usar a tool deploy_model para salvar o modelo em produção\n"
-        "- Verificar que modelo, scaler e metadados foram salvos\n"
-        "- Reportar os caminhos dos artefatos gerados\n\n"
-        "Execute o deploy e retorne o status final."
-        "NUNCA inclua frases de cortesia, despedida ou oferecimento de ajuda. "
-        "Seja direto e técnico."
+        "You are the DeployAgent, a specialist in model deployment.\n\n"
+        "YOUR RESPONSIBILITIES:\n"
+        "- Use the deploy_model tool to save the model for production\n"
+        "- Verify that the model, scaler, and metadata were saved\n"
+        "- Report the paths of the generated artifacts\n\n"
+        "Run the deployment and return the final status. "
+        "NEVER include courtesy phrases, farewells, or offers of further help. "
+        "Be direct and technical."
     ),
     "tools": [deploy_model],
 }
 
-print("✅ SubAgents definidos: drift_detector, preprocessor, trainer, result_analyzer, deployer")
+print("✅ SubAgents defined: drift_detector, preprocessor, trainer, result_analyzer, deployer")
 
 
-# %% CELL 12 — Orquestrador com SubAgents
-ORCHESTRATOR_PROMPT = """Você é o Orquestrador Principal de um pipeline de ML para o dataset fetal_health.
-Você NÃO executa tarefas diretamente. Você DELEGA para subagents especializados usando a tool `task`.
+ORCHESTRATOR_PROMPT = """You are the Main Orchestrator of an ML pipeline for the fetal_health dataset.
+You do NOT execute tasks directly. You DELEGATE to specialised subagents using the `task` tool.
 
-SUBAGENTS DISPONÍVEIS:
-- drift_detector: verifica data drift
-- preprocessor: pré-processa dados
-- trainer: treina modelos
-- result_analyzer: analisa resultados
-- deployer: faz deploy do modelo
+AVAILABLE SUBAGENTS:
+- drift_detector: checks for data drift
+- preprocessor: preprocesses data
+- trainer: trains models
+- result_analyzer: analyses results
+- deployer: deploys the model
 
-FLUXO OBRIGATÓRIO:
-1. Delegue ao `drift_detector` para verificar drift (reference_start=0, reference_end=200, current_start=1000, current_end=1200)
-2. Delegue ao `preprocessor` para preparar os dados
-3. Delegue ao `trainer` para treinar o(s) modelo(s) solicitado(s)
-4. Delegue ao `result_analyzer` para avaliar os resultados
-5. Delegue ao `deployer` para fazer o deploy
+MANDATORY FLOW:
+1. Delegate to `drift_detector` to check for drift (reference_start=0, reference_end=200, current_start=1000, current_end=1200)
+2. Delegate to `preprocessor` to prepare the data
+3. Delegate to `trainer` to train the requested model(s)
+4. Delegate to `result_analyzer` to evaluate the results
+5. Delegate to `deployer` to deploy the model
 
-REGRAS:
-- Execute TODAS as etapas em sequência, sem interrupção.
-- NUNCA pare para perguntar ao usuário se deseja prosseguir. Você é autônomo.
-- Se drift for detectado, registre um WARNING e continue o pipeline.
-- Explique seu raciocínio brevemente ANTES de cada delegação.
-- Ao final, apresente um resumo consolidado de todo o pipeline.
+RULES:
+- Execute ALL steps in sequence without interruption.
+- NEVER pause to ask the user whether to proceed. You are autonomous.
+- If drift is detected, log a WARNING and continue the pipeline.
+- Briefly explain your reasoning BEFORE each delegation.
+- At the end, present a consolidated summary of the entire pipeline.
 """
 
 
 def create_ml_orchestrator(model_name: str = "gpt-4o-mini", temperature: float = 0):
-    """Cria o orquestrador com arquitetura de subagents."""
+    """Creates the orchestrator with a subagent architecture."""
     llm = ChatOpenAI(model=model_name, temperature=temperature)
 
     orchestrator = create_deep_agent(
         model=llm,
-        tools=[],  # Orquestrador não tem tools próprias — só delega
+        tools=[],
         subagents=[
             drift_agent,
             preprocess_agent,
@@ -604,20 +572,19 @@ def create_ml_orchestrator(model_name: str = "gpt-4o-mini", temperature: float =
     )
     return orchestrator
 
-print("✅ Orquestrador com SubAgents configurado")
+print("✅ Orchestrator with SubAgents configured")
 
 
-# %% CELL 13 — Execução do Pipeline
 orchestrator = create_ml_orchestrator()
 
 initial_state = {
     "messages": [
         HumanMessage(
             content=(
-                "Execute o pipeline completo de ML. "
-                "Verifique drift, pré-processe os dados, "
-                "treine um RandomForest e um LogisticRegression, "
-                "analise os resultados e faça o deploy do melhor modelo."
+                "Run the full ML pipeline. "
+                "Check for drift, preprocess the data, "
+                "train a RandomForest and a LogisticRegression, "
+                "analyse the results, and deploy the best model."
             )
         )
     ],
@@ -635,7 +602,7 @@ initial_state = {
     "current_stage": "start",
 }
 
-print("🚀 Iniciando Pipeline ML com SubAgents...\n")
+print("🚀 Starting ML Pipeline with SubAgents...\n")
 
 try:
     for event in orchestrator.stream(initial_state, stream_mode="values"):
@@ -645,12 +612,12 @@ try:
                 if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
                     for tc in last_msg.tool_calls:
                         agent_name = tc.get("args", {}).get("subagent_type", tc.get("name", "?"))
-                        print(f"🛠️  Delegando para: {agent_name}")
+                        print(f"🛠️  Delegating to: {agent_name}")
                 elif isinstance(last_msg, ToolMessage):
-                    print(f"📦 Resultado:\n{last_msg.content}\n")
+                    print(f"📦 Result:\n{last_msg.content}\n")
                 else:
-                    print(f"🤖 Orquestrador:\n{last_msg.content}\n")
+                    print(f"🤖 Orchestrator:\n{last_msg.content}\n")
 except Exception as e:
-    print(f"❌ Erro: {e}")
+    print(f"❌ Error: {e}")
     import traceback
     traceback.print_exc()
