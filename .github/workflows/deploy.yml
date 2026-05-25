@@ -32,8 +32,35 @@ jobs:
     needs: test
 
     steps:
-      - name: Deploy to Render
-        uses: johnbeynon/render-deploy-action@v0.0.8
-        with:
-          service-id: ${{ secrets.RENDER_SERVICE_ID }}
-          api-key: ${{ secrets.RENDER_API_KEY }}
+      - name: Deploy to Render and wait
+        run: |
+          DEPLOY_RESPONSE=$(curl -fsSL -X POST "https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/deploys" \
+            -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" \
+            -H "Content-Type: application/json")
+
+          DEPLOY_ID=$(echo "$DEPLOY_RESPONSE" | jq -r '.id')
+          echo "Deploy triggered: $DEPLOY_ID"
+
+          MAX_ATTEMPTS=20
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            STATUS=$(curl -fsSL "https://api.render.com/v1/services/${{ secrets.RENDER_SERVICE_ID }}/deploys/$DEPLOY_ID" \
+              -H "Authorization: Bearer ${{ secrets.RENDER_API_KEY }}" | jq -r '.status')
+
+            echo "Attempt $((ATTEMPT + 1))/$MAX_ATTEMPTS — status: $STATUS"
+
+            if [ "$STATUS" = "live" ]; then
+              echo "Deploy succeeded!"
+              exit 0
+            elif [[ "$STATUS" == *"failed"* ]] || [ "$STATUS" = "canceled" ]; then
+              echo "Deploy failed with status: $STATUS"
+              exit 1
+            fi
+
+            ATTEMPT=$((ATTEMPT + 1))
+            sleep 30
+          done
+
+          echo "Deploy timed out after $((MAX_ATTEMPTS * 30 / 60)) minutes"
+          exit 1
