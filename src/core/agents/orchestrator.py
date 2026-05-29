@@ -6,6 +6,7 @@ from src.core.agents.analyzer_agent import analyzer_agent
 from src.core.agents.deploy_agent import deploy_agent
 from src.core.agents.drift_agent import drift_agent
 from src.core.agents.preprocess_agent import preprocess_agent
+from src.core.agents.registration_agent import registration_agent
 from src.core.agents.trainer_agent import trainer_agent
 from src.core.prompts.agent_prompts import ORCHESTRATOR_SYSTEM_PROMPT
 from src.core.schema import MLPipelineContext
@@ -32,6 +33,7 @@ def create_ml_orchestrator(model_name: str = "gpt-4o-mini", temperature: float =
             trainer_agent,
             analyzer_agent,
             deploy_agent,
+            registration_agent,
         ],
         context_schema=MLPipelineContext,
         system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
@@ -64,6 +66,8 @@ def run_pipeline() -> None:
         "best_model_name": "",
         "best_accuracy": 0.0,
         "model_path": "",
+        "mlflow_run_id": "",
+        "model_version": "",
         "current_stage": "start",
     }
 

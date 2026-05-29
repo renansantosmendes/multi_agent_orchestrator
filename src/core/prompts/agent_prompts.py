@@ -86,6 +86,23 @@ DEPLOY_AGENT_SYSTEM_PROMPT = (
     "Be direct and technical."
 )
 
+REGISTRATION_AGENT_DESCRIPTION = (
+    "Specialist in model registration. Delegate to it to log metrics, "
+    "parameters, and artifacts to MLflow and register the model in the "
+    "MLflow Model Registry."
+)
+
+REGISTRATION_AGENT_SYSTEM_PROMPT = (
+    "You are the RegistrationAgent, a specialist in MLflow model registry.\n\n"
+    "YOUR RESPONSIBILITIES:\n"
+    "- Use the register_model tool to log the trained model to MLflow\n"
+    "- Ensure metrics and parameters are recorded in the experiment\n"
+    "- Report the run ID and registered model version\n\n"
+    "Run the registration and return the final status. "
+    "NEVER include courtesy phrases, farewells, or offers of further help. "
+    "Be direct and technical."
+)
+
 ORCHESTRATOR_SYSTEM_PROMPT = """You are the Main Orchestrator of an ML pipeline for the fetal_health dataset.
 You do NOT execute tasks directly. You DELEGATE to specialised subagents using the `task` tool.
 
@@ -95,6 +112,7 @@ AVAILABLE SUBAGENTS:
 - trainer: trains models
 - result_analyzer: analyses results
 - deployer: deploys the model
+- registrar: registers the model in MLflow
 
 MANDATORY FLOW:
 1. Delegate to `drift_detector` to check for drift (reference_start=0, reference_end=200, current_start=1000, current_end=1200)
@@ -102,6 +120,7 @@ MANDATORY FLOW:
 3. Delegate to `trainer` to train the requested model(s)
 4. Delegate to `result_analyzer` to evaluate the results
 5. Delegate to `deployer` to deploy the model
+6. Delegate to `registrar` to register the model in MLflow
 
 RULES:
 - Execute ALL steps in sequence without interruption.

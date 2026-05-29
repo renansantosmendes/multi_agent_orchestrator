@@ -33,14 +33,14 @@ class TestCreateMlOrchestrator:
 
     @patch("src.core.agents.orchestrator.create_deep_agent")
     @patch("src.core.agents.orchestrator.ChatOpenAI")
-    def test_passes_five_subagents(
+    def test_passes_six_subagents(
         self, mock_chat_openai: MagicMock, mock_create_deep_agent: MagicMock
     ) -> None:
-        """Verifies that all five subagents are passed to create_deep_agent."""
+        """Verifies that all six subagents are passed to create_deep_agent."""
         create_ml_orchestrator()
 
         _, kwargs = mock_create_deep_agent.call_args
-        assert len(kwargs["subagents"]) == 5
+        assert len(kwargs["subagents"]) == 6
 
     @patch("src.core.agents.orchestrator.create_deep_agent")
     @patch("src.core.agents.orchestrator.ChatOpenAI")

@@ -20,4 +20,6 @@ class MLPipelineContext(TypedDict):
     best_model_name: str
     best_accuracy: float
     model_path: str
+    mlflow_run_id: str
+    model_version: str
     current_stage: str
