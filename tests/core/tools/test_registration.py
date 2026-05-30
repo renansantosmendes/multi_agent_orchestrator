@@ -38,7 +38,6 @@ def test_register_model_success(mock_configure, mock_register, trained_run_in_st
     mock_register.return_value = _make_mock_model_version("2")
 
     result = register_model.func(
-        registered_model_name="test_model",
         tool_call_id="tc1",
     )
 
@@ -47,7 +46,7 @@ def test_register_model_success(mock_configure, mock_register, trained_run_in_st
     assert result.update["current_stage"] == "registered"
     mock_register.assert_called_once_with(
         model_uri="https://dagshub.com/user/repo.mlflow/artifacts/run-001/model",
-        name="test_model",
+        name="fetal_health",
     )
 
 
@@ -57,7 +56,6 @@ def test_register_model_without_run_id(mock_configure):
     from src.core.tools.registration import register_model
 
     result = register_model.func(
-        registered_model_name="test_model",
         tool_call_id="tc2",
     )
 
@@ -73,7 +71,7 @@ def test_register_model_uses_correct_uri(mock_configure, mock_register, trained_
 
     mock_register.return_value = _make_mock_model_version("3")
 
-    register_model.func(registered_model_name="model", tool_call_id="tc3")
+    register_model.func(tool_call_id="tc3")
 
     uri_used = mock_register.call_args.kwargs["model_uri"]
     assert uri_used == "https://dagshub.com/user/repo.mlflow/artifacts/run-001/model"

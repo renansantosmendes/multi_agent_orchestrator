@@ -22,6 +22,7 @@ def _populate_store_with_data() -> None:
     store.pipeline_store["y_train"] = y[:split]
     store.pipeline_store["y_test"] = y[split:]
     store.pipeline_store["feature_cols"] = [f"f{i}" for i in range(5)]
+    store.pipeline_store["experiment_name"] = "test_experiment"
 
 
 @pytest.fixture(autouse=True)
@@ -40,11 +41,11 @@ def mock_mlflow():
 
     with patch("src.core.tools.training.configure_dagshub_tracking"), \
          patch("src.core.tools.training.mlflow.set_experiment"), \
+         patch("src.core.tools.training.mlflow.sklearn.autolog"), \
+         patch("src.core.tools.training.mlflow.sklearn.log_model"), \
          patch("src.core.tools.training.mlflow.start_run") as mock_start_run, \
-         patch("src.core.tools.training.mlflow.log_params"), \
          patch("src.core.tools.training.mlflow.log_param"), \
          patch("src.core.tools.training.mlflow.log_metric"), \
-         patch("src.core.tools.training.mlflow.sklearn.log_model"), \
          patch("src.core.tools.training.mlflow.get_artifact_uri", return_value="https://fake-dagshub/model"):
         mock_start_run.return_value.__enter__ = lambda _: mock_run
         mock_start_run.return_value.__exit__ = MagicMock(return_value=False)
@@ -98,6 +99,22 @@ class TestTrainModel:
         assert len(result.update["accuracy_history"]) == 1
         assert 0.0 <= result.update["accuracy_history"][0] <= 1.0
         assert store.pipeline_store["last_accuracy"] == result.update["best_accuracy"]
+
+    def test_experiment_name_read_from_pipeline_store(self) -> None:
+        """Verifies the experiment name comes from pipeline_store, not the LLM."""
+        _populate_store_with_data()
+
+        with patch("src.core.tools.training.mlflow.set_experiment") as mock_set_exp:
+            train_model.func(model_name="RandomForest", tool_call_id="test-id")
+            mock_set_exp.assert_called_once_with("test_experiment")
+
+    def test_autolog_is_enabled(self) -> None:
+        """Verifies mlflow.sklearn.autolog is called before the run."""
+        _populate_store_with_data()
+
+        with patch("src.core.tools.training.mlflow.sklearn.autolog") as mock_autolog:
+            train_model.func(model_name="RandomForest", tool_call_id="test-id")
+            mock_autolog.assert_called_once()
 
     def test_run_id_stored_in_pipeline_store(self) -> None:
         """Verifies the MLflow run_id is persisted in the pipeline store."""

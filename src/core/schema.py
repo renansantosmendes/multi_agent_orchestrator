@@ -19,6 +19,7 @@ class MLPipelineContext(TypedDict):
     trained_models: Annotated[List[str], operator.add]
     best_model_name: str
     best_accuracy: float
+    experiment_name: str
     model_path: str
     mlflow_run_id: str
     model_version: str

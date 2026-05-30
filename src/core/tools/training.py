@@ -1,5 +1,9 @@
 import inspect
 from typing import Annotated, Any, Dict, Optional
+from uuid import uuid4
+
+import matplotlib
+matplotlib.use("Agg")
 
 import mlflow
 import mlflow.sklearn
@@ -21,21 +25,20 @@ logger = get_logger(__name__)
 def train_model(
     model_name: str,
     params: Optional[Dict[str, Any]] = None,
-    experiment_name: str = "ml_pipeline",
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """Trains an ML model on the already preprocessed fetal_health dataset.
 
-    Opens an MLflow run, logs hyperparameters, accuracy, and the model
-    artifact, then stores the run_id in the pipeline store for later
-    registration.
+    Uses MLflow autolog to capture hyperparameters, metrics, and model
+    artifacts automatically. The experiment name is read from the pipeline
+    store so all models in the same run share the same MLflow experiment.
 
     Args:
         model_name: Model name — 'RandomForest', 'LogisticRegression',
                     or 'GradientBoosting'.
         params: Optional hyperparameters (e.g. {'n_estimators': 200}).
-        experiment_name: MLflow experiment name to log the run under.
     """
+    experiment_name = pipeline_store.get("experiment_name", "agentic_ml_pipeline")
     logger.info("Training started | model=%s experiment=%s", model_name, experiment_name)
 
     if "X_train" not in pipeline_store:
@@ -66,25 +69,29 @@ def train_model(
     filtered = {k: v for k, v in merged.items() if k in valid_args}
     logger.info("Model instantiated | class=%s params=%s", model_class.__name__, filtered)
 
-    model = model_class(**filtered)
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
-    acc = accuracy_score(y_test, y_pred)
-    logger.info("Model trained | accuracy=%.4f", acc)
-
     configure_dagshub_tracking()
     mlflow.set_experiment(experiment_name)
+    mlflow.sklearn.autolog(
+        log_models=False,
+        log_input_examples=False,
+        log_post_training_metrics=False,
+        silent=True,
+    )
 
-    with mlflow.start_run(run_name=model_name) as run:
-        mlflow.log_params(filtered)
-        mlflow.log_param("model_type", model_name)
-        mlflow.log_param("feature_count", len(pipeline_store.get("feature_cols", [])))
-        mlflow.log_metric("accuracy", acc)
+    model = model_class(**filtered)
+
+    run_name = f"fetal_health_{model_name}_{uuid4().hex[:8]}"
+    with mlflow.start_run(run_name=run_name) as run:
+        model.fit(X_train, y_train)
         mlflow.sklearn.log_model(sk_model=model, artifact_path="model")
+        y_pred = model.predict(X_test)
+        acc = accuracy_score(y_test, y_pred)
+        mlflow.log_param("feature_count", len(pipeline_store.get("feature_cols", [])))
+        mlflow.log_metric("test_accuracy", acc)
         run_id = run.info.run_id
         model_artifact_uri = mlflow.get_artifact_uri("model")
 
-    logger.info("MLflow run logged | run_id=%s artifact_uri=%s", run_id, model_artifact_uri)
+    logger.info("Model trained | accuracy=%.4f run_id=%s", acc, run_id)
 
     pipeline_store["trained_model"] = model
     pipeline_store["y_pred"] = y_pred

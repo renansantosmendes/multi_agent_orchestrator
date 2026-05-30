@@ -1,3 +1,5 @@
+from uuid import uuid4
+
 from deepagents import create_deep_agent
 from langchain_core.messages import HumanMessage, ToolMessage
 from langchain_openai import ChatOpenAI
@@ -11,6 +13,7 @@ from src.core.agents.trainer_agent import trainer_agent
 from src.core.logging_config import get_logger
 from src.core.prompts.agent_prompts import ORCHESTRATOR_SYSTEM_PROMPT
 from src.core.schema import MLPipelineContext
+from src.core.tools.store import pipeline_store
 
 logger = get_logger(__name__)
 
@@ -47,6 +50,8 @@ def create_ml_orchestrator(model_name: str = "gpt-4o-mini", temperature: float =
 def run_pipeline() -> None:
     """Runs the full ML pipeline using the multi-agent orchestrator."""
     orchestrator = create_ml_orchestrator()
+    experiment_name = f"agentic_ml_pipeline_{uuid4().hex[:8]}"
+    pipeline_store["experiment_name"] = experiment_name
 
     initial_state = {
         "messages": [
@@ -69,13 +74,14 @@ def run_pipeline() -> None:
         "trained_models": [],
         "best_model_name": "",
         "best_accuracy": 0.0,
+        "experiment_name": experiment_name,
         "model_path": "",
         "mlflow_run_id": "",
         "model_version": "",
         "current_stage": "start",
     }
 
-    logger.info("Pipeline started")
+    logger.info("Pipeline started | experiment=%s", experiment_name)
 
     try:
         for event in orchestrator.stream(initial_state, stream_mode="values"):

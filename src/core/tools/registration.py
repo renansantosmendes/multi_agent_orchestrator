@@ -11,21 +11,19 @@ from src.core.tools.store import pipeline_store
 
 logger = get_logger(__name__)
 
+REGISTERED_MODEL_NAME = "fetal_health"
+
 
 @tool
 def register_model(
-    registered_model_name: str = "fetal_health_classifier",
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
-    """Registers the best trained model in the MLflow Model Registry.
+    """Registers the best trained model in the MLflow Model Registry as 'fetal_health'.
 
     Reuses the run_id generated during training to register the artifact
     already logged — no re-upload of the model artifact.
-
-    Args:
-        registered_model_name: Name used when registering the model in the MLflow registry.
     """
-    logger.info("Model registration started | registry_name=%s", registered_model_name)
+    logger.info("Model registration started | registry_name=%s", REGISTERED_MODEL_NAME)
 
     run_id = pipeline_store.get("last_run_id")
     artifact_uri = pipeline_store.get("last_model_artifact_uri")
@@ -45,7 +43,7 @@ def register_model(
 
     model_version = mlflow.register_model(
         model_uri=model_uri,
-        name=registered_model_name,
+        name=REGISTERED_MODEL_NAME,
     )
 
     version = model_version.version
@@ -54,14 +52,14 @@ def register_model(
 
     logger.info(
         "Registration complete | registry=%s version=%s run_id=%s",
-        registered_model_name, version, run_id,
+        REGISTERED_MODEL_NAME, version, run_id,
     )
 
     summary = (
         f"MODEL REGISTRATION COMPLETE\n"
         f"   Model type:    {model_name} (accuracy: {accuracy:.4f})\n"
         f"   Run ID:        {run_id}\n"
-        f"   Registry name: {registered_model_name}\n"
+        f"   Registry name: {REGISTERED_MODEL_NAME}\n"
         f"   Version:       {version}\n"
         f"   Status: Ready"
     )
