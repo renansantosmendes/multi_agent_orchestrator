@@ -1,70 +1,75 @@
 from typing import Annotated
 
 import mlflow
-import mlflow.sklearn
 from langchain_core.messages import ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.types import Command
 
+from src.core.logging_config import get_logger
+from src.core.tools.mlflow_config import configure_dagshub_tracking
 from src.core.tools.store import pipeline_store
+
+logger = get_logger(__name__)
 
 
 @tool
 def register_model(
-    experiment_name: str = "ml_pipeline",
     registered_model_name: str = "fetal_health_classifier",
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
-    """Registers the best trained model in MLflow, logging metrics and artifacts.
+    """Registers the best trained model in the MLflow Model Registry.
+
+    Reuses the run_id generated during training to register the artifact
+    already logged — no re-upload of the model artifact.
 
     Args:
-        experiment_name: MLflow experiment name to log the run under.
         registered_model_name: Name used when registering the model in the MLflow registry.
     """
-    if "trained_model" not in pipeline_store:
-        msg = "Error: no trained model found. Run train_model before registering."
+    logger.info("Model registration started | registry_name=%s", registered_model_name)
+
+    run_id = pipeline_store.get("last_run_id")
+    artifact_uri = pipeline_store.get("last_model_artifact_uri")
+    model_name = pipeline_store.get("last_model_name", "unknown")
+    accuracy = pipeline_store.get("last_accuracy", 0.0)
+
+    if not run_id:
+        logger.error("Registration aborted | reason=no run_id found in pipeline store")
+        msg = "Error: no MLflow run_id found. Run train_model before registering."
         return Command(
             update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]}
         )
 
-    model = pipeline_store["trained_model"]
-    model_name = pipeline_store.get("last_model_name", "unknown")
-    accuracy = pipeline_store.get("last_accuracy", 0.0)
-    feature_cols = pipeline_store.get("feature_cols", [])
+    model_uri = artifact_uri if artifact_uri else f"runs:/{run_id}/model"
+    logger.info("Registering model | model_uri=%s model=%s accuracy=%.4f", model_uri, model_name, accuracy)
+    configure_dagshub_tracking()
 
-    mlflow.set_experiment(experiment_name)
+    model_version = mlflow.register_model(
+        model_uri=model_uri,
+        name=registered_model_name,
+    )
 
-    with mlflow.start_run() as run:
-        mlflow.log_param("model_type", model_name)
-        mlflow.log_param("feature_count", len(feature_cols))
-        mlflow.log_metric("accuracy", accuracy)
-
-        model_info = mlflow.sklearn.log_model(
-            sk_model=model,
-            artifact_path="model",
-            registered_model_name=registered_model_name,
-        )
-
-    run_id = run.info.run_id
-    model_version = model_info.registered_model_version
-
+    version = model_version.version
     pipeline_store["mlflow_run_id"] = run_id
-    pipeline_store["model_version"] = model_version
+    pipeline_store["model_version"] = version
+
+    logger.info(
+        "Registration complete | registry=%s version=%s run_id=%s",
+        registered_model_name, version, run_id,
+    )
 
     summary = (
         f"MODEL REGISTRATION COMPLETE\n"
-        f"   Experiment:    {experiment_name}\n"
         f"   Model type:    {model_name} (accuracy: {accuracy:.4f})\n"
         f"   Run ID:        {run_id}\n"
         f"   Registry name: {registered_model_name}\n"
-        f"   Version:       {model_version}\n"
+        f"   Version:       {version}\n"
         f"   Status: Ready"
     )
 
     return Command(
         update={
             "mlflow_run_id": run_id,
-            "model_version": str(model_version),
+            "model_version": str(version),
             "current_stage": "registered",
             "messages": [ToolMessage(content=summary, tool_call_id=tool_call_id)],
         }

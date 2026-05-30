@@ -1,35 +1,48 @@
 import inspect
 from typing import Annotated, Any, Dict, Optional
 
+import mlflow
+import mlflow.sklearn
 from langchain_core.messages import ToolMessage
-from langchain_core.tools import tool, InjectedToolCallId
+from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.types import Command
 from sklearn.ensemble import GradientBoostingClassifier, RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 
+from src.core.logging_config import get_logger
+from src.core.tools.mlflow_config import configure_dagshub_tracking
 from src.core.tools.store import pipeline_store
+
+logger = get_logger(__name__)
 
 
 @tool
 def train_model(
     model_name: str,
     params: Optional[Dict[str, Any]] = None,
+    experiment_name: str = "ml_pipeline",
     tool_call_id: Annotated[str, InjectedToolCallId] = None,
 ) -> Command:
     """Trains an ML model on the already preprocessed fetal_health dataset.
+
+    Opens an MLflow run, logs hyperparameters, accuracy, and the model
+    artifact, then stores the run_id in the pipeline store for later
+    registration.
 
     Args:
         model_name: Model name — 'RandomForest', 'LogisticRegression',
                     or 'GradientBoosting'.
         params: Optional hyperparameters (e.g. {'n_estimators': 200}).
+        experiment_name: MLflow experiment name to log the run under.
     """
+    logger.info("Training started | model=%s experiment=%s", model_name, experiment_name)
+
     if "X_train" not in pipeline_store:
+        logger.error("Training aborted | reason=preprocessing not run")
         msg = "❌ Error: run preprocess_data before training."
         return Command(
-            update={
-                "messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]
-            }
+            update={"messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)]}
         )
 
     X_train = pipeline_store["X_train"]
@@ -51,26 +64,49 @@ def train_model(
     merged = {**defaults, **params}
     valid_args = set(inspect.signature(model_class).parameters.keys())
     filtered = {k: v for k, v in merged.items() if k in valid_args}
+    logger.info("Model instantiated | class=%s params=%s", model_class.__name__, filtered)
 
     model = model_class(**filtered)
     model.fit(X_train, y_train)
     y_pred = model.predict(X_test)
     acc = accuracy_score(y_test, y_pred)
+    logger.info("Model trained | accuracy=%.4f", acc)
+
+    configure_dagshub_tracking()
+    mlflow.set_experiment(experiment_name)
+
+    with mlflow.start_run(run_name=model_name) as run:
+        mlflow.log_params(filtered)
+        mlflow.log_param("model_type", model_name)
+        mlflow.log_param("feature_count", len(pipeline_store.get("feature_cols", [])))
+        mlflow.log_metric("accuracy", acc)
+        mlflow.sklearn.log_model(sk_model=model, artifact_path="model")
+        run_id = run.info.run_id
+        model_artifact_uri = mlflow.get_artifact_uri("model")
+
+    logger.info("MLflow run logged | run_id=%s artifact_uri=%s", run_id, model_artifact_uri)
 
     pipeline_store["trained_model"] = model
     pipeline_store["y_pred"] = y_pred
     pipeline_store["last_model_name"] = model_name
     pipeline_store["last_accuracy"] = acc
+    pipeline_store["last_run_id"] = run_id
+    pipeline_store["last_model_artifact_uri"] = model_artifact_uri
+
+    run_ids = pipeline_store.get("mlflow_run_ids", {})
+    run_ids[model_name] = run_id
+    pipeline_store["mlflow_run_ids"] = run_ids
 
     history = pipeline_store.get("models_trained", [])
-    history.append({"name": model_name, "accuracy": round(acc, 4), "params": filtered})
+    history.append({"name": model_name, "accuracy": round(acc, 4), "params": filtered, "run_id": run_id})
     pipeline_store["models_trained"] = history
 
     summary = (
-        f"🏋️ TRAINING COMPLETE\n"
-        f"   Model: {model_name}\n"
-        f"   Params: {filtered}\n"
-        f"   Accuracy: {acc:.4f} ({acc:.1%})"
+        f"TRAINING COMPLETE\n"
+        f"   Model:    {model_name}\n"
+        f"   Params:   {filtered}\n"
+        f"   Accuracy: {acc:.4f} ({acc:.1%})\n"
+        f"   MLflow run ID: {run_id}"
     )
 
     return Command(

@@ -8,8 +8,11 @@ from src.core.agents.drift_agent import drift_agent
 from src.core.agents.preprocess_agent import preprocess_agent
 from src.core.agents.registration_agent import registration_agent
 from src.core.agents.trainer_agent import trainer_agent
+from src.core.logging_config import get_logger
 from src.core.prompts.agent_prompts import ORCHESTRATOR_SYSTEM_PROMPT
 from src.core.schema import MLPipelineContext
+
+logger = get_logger(__name__)
 
 
 def create_ml_orchestrator(model_name: str = "gpt-4o-mini", temperature: float = 0) -> object:
@@ -22,6 +25,7 @@ def create_ml_orchestrator(model_name: str = "gpt-4o-mini", temperature: float =
     Returns:
         A compiled LangGraph agent ready to stream pipeline events.
     """
+    logger.info("Creating orchestrator | model=%s temperature=%s", model_name, temperature)
     llm = ChatOpenAI(model=model_name, temperature=temperature)
 
     return create_deep_agent(
@@ -71,7 +75,7 @@ def run_pipeline() -> None:
         "current_stage": "start",
     }
 
-    print("🚀 Starting ML Pipeline with SubAgents...\n")
+    logger.info("Pipeline started")
 
     try:
         for event in orchestrator.stream(initial_state, stream_mode="values"):
@@ -81,12 +85,10 @@ def run_pipeline() -> None:
                     if hasattr(last_msg, "tool_calls") and last_msg.tool_calls:
                         for tc in last_msg.tool_calls:
                             agent_name = tc.get("args", {}).get("subagent_type", tc.get("name", "?"))
-                            print(f"🛠️  Delegating to: {agent_name}")
+                            logger.info("Delegating | agent=%s", agent_name)
                     elif isinstance(last_msg, ToolMessage):
-                        print(f"📦 Result:\n{last_msg.content}\n")
+                        logger.info("Agent result received | length=%d chars", len(last_msg.content))
                     else:
-                        print(f"🤖 Orchestrator:\n{last_msg.content}\n")
+                        logger.info("Orchestrator message | content=%.120s", last_msg.content)
     except Exception as e:
-        print(f"❌ Error: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.exception("Pipeline failed | error=%s", e)

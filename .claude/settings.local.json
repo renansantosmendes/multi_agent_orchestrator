@@ -4,7 +4,8 @@
       "Bash(python -m src.core.run)",
       "Bash(python -m pytest tests/core/tools/test_registration.py tests/core/agents/test_registration_agent.py -v)",
       "Bash(\".venv/Scripts/pip.exe\" install *)",
-      "Bash(\".venv/Scripts/python.exe\" -c \"import mlflow; print\\(mlflow.__version__\\)\")"
+      "Bash(\".venv/Scripts/python.exe\" -c \"import mlflow; print\\(mlflow.__version__\\)\")",
+      "Bash(\".venv/Scripts/python.exe\" -c \"import src.core; print\\('src.core OK'\\)\")"
     ]
   }
 }
